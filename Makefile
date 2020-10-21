@@ -8,6 +8,8 @@ RESTY_IMAGE_TAG?=bionic
 PACKAGE_TYPE?=deb
 PACKAGE_TYPE?=debian
 
+UBI8_IMG="registry.access.redhat.com/ubi8/ubi:latest"
+
 TEST_ADMIN_PROTOCOL?=http://
 TEST_ADMIN_PORT?=8001
 TEST_HOST?=localhost
@@ -37,9 +39,9 @@ RESTY_PCRE_VERSION ?= `grep RESTY_PCRE_VERSION $(KONG_SOURCE_LOCATION)/.requirem
 KONG_GMP_VERSION ?= `grep KONG_GMP_VERSION $(KONG_SOURCE_LOCATION)/.requirements | awk -F"=" '{print $$2}'`
 KONG_NETTLE_VERSION ?= `grep KONG_NETTLE_VERSION $(KONG_SOURCE_LOCATION)/.requirements | awk -F"=" '{print $$2}'`
 KONG_NGINX_MODULE ?= `grep KONG_NGINX_MODULE $(KONG_SOURCE_LOCATION)/.requirements | awk -F"=" '{print $$2}'`
-LIBYAML_VERSION ?= `grep LIBYAML_VERSION $(KONG_SOURCE_LOCATION)/.requirements | awk -F"=" '{print $$2}'`
 OPENRESTY_PATCHES ?= 1
-DOCKER_KONG_VERSION = 'master'
+LIBYAML_VERSION ?= 0.2.3
+DOCKER_KONG_VERSION ?= 'master'
 DEBUG ?= 0
 RELEASE_DOCKER_ONLY ?= false
 
@@ -57,7 +59,8 @@ endif
 BUILDX_INFO ?= $(shell docker buildx 2>&1 >/dev/null; echo $?)
 
 ifeq ($(BUILDX),false)
-	DOCKER_COMMAND?=docker build --build-arg BUILDPLATFORM=x/amd64
+#	DOCKER_COMMAND?=docker build --build-arg BUILDPLATFORM=x/amd64
+	DOCKER_COMMAND?=docker build --build-arg BUILDPLATFORM=linux/s390x
 else
 	DOCKER_COMMAND?=docker buildx build --push --platform="linux/amd64,linux/arm64"
 endif
@@ -144,8 +147,9 @@ build-base:
 ifeq ($(RESTY_IMAGE_BASE),src)
 	@echo "nothing to be done"
 else ifeq ($(RESTY_IMAGE_BASE),rhel)
-	docker pull centos:${RESTY_IMAGE_TAG}
-	docker tag centos:${RESTY_IMAGE_TAG} rhel:${RESTY_IMAGE_TAG}
+	@echo "start downloading ubi8 imagei ###" $(UBI8_IMG)
+	docker pull $(UBI8_IMG)
+	docker tag $(UBI8_IMG) "rhel:8"
 	PACKAGE_TYPE=rpm
 endif
 	$(CACHE_COMMAND) $(DOCKER_REPOSITORY):$(RESTY_IMAGE_BASE)-$(RESTY_IMAGE_TAG)-$(DOCKER_BASE_SUFFIX) || \
@@ -213,7 +217,7 @@ ifeq ($(BUILDX),false)
 	mv output/output/*.$(PACKAGE_TYPE)* output/
 	rm -rf output/*/
 else
-	docker buildx build --output output --platform linux/amd64,linux/arm64 -f dockerfiles/Dockerfile.scratch \
+	docker buildx build --output output --platform linux/amd64,linux/s390x -f dockerfiles/Dockerfile.scratch \
 	--build-arg RESTY_IMAGE_TAG="$(RESTY_IMAGE_TAG)" \
 	--build-arg RESTY_IMAGE_BASE=$(RESTY_IMAGE_BASE) \
 	--build-arg DOCKER_REPOSITORY=$(DOCKER_REPOSITORY) \
@@ -247,19 +251,24 @@ kong-test-container:
 ifneq ($(RESTY_IMAGE_BASE),src)
 	-rm -rf kong
 	-cp -R $(KONG_SOURCE_LOCATION) kong
-	$(CACHE_COMMAND) $(DOCKER_REPOSITORY):test-$(DOCKER_TEST_SUFFIX) || \
+	$(CACHE_COMMAND) $(DOCKER_REPOSITORY):test-$(DOCKER_OPENRESTY_SUFFIX) || \
 	( $(MAKE) build-openresty && \
 	docker tag $(DOCKER_REPOSITORY):openresty-$(RESTY_IMAGE_BASE)-$(RESTY_IMAGE_TAG)-$(DOCKER_OPENRESTY_SUFFIX) \
-	$(DOCKER_REPOSITORY):test-$(DOCKER_OPENRESTY_SUFFIX) && \
+	$(DOCKER_REPOSITORY):test-$(DOCKER_OPENRESTY_SUFFIX) )
+
+	docker run -d --rm --name test $(DOCKER_REPOSITORY):test-$(DOCKER_OPENRESTY_SUFFIX) tail -f /dev/null
+	docker export test | docker import - $(DOCKER_REPOSITORY):test-$(DOCKER_OPENRESTY_SUFFIX)
+	docker stop test
+
 	$(DOCKER_COMMAND) -f test/Dockerfile.test \
 	--build-arg KONG_GO_PLUGINSERVER_VERSION=$(KONG_GO_PLUGINSERVER_VERSION) \
 	--build-arg DOCKER_REPOSITORY=$(DOCKER_REPOSITORY) \
 	--build-arg DOCKER_OPENRESTY_SUFFIX=$(DOCKER_OPENRESTY_SUFFIX) \
-	-t $(DOCKER_REPOSITORY):test-$(DOCKER_TEST_SUFFIX) . )
-	
+	-t $(DOCKER_REPOSITORY):test-$(DOCKER_TEST_SUFFIX) .
 	docker tag $(DOCKER_REPOSITORY):test-$(DOCKER_TEST_SUFFIX) $(DOCKER_REPOSITORY):test
-	
-	-$(UPDATE_CACHE_COMMAND) $(DOCKER_REPOSITORY):test-$(DOCKER_TEST_SUFFIX)
+	docker tag $(DOCKER_REPOSITORY):test-$(DOCKER_TEST_SUFFIX) $(DOCKER_REPOSITORY):test-$(DOCKER_OPENRESTY_SUFFIX)
+
+	-$(UPDATE_CACHE_COMMAND) $(DOCKER_REPOSITORY):test-$(DOCKER_OPENRESTY_SUFFIX)
 endif
 
 test-kong: kong-test-container
@@ -268,7 +277,8 @@ test-kong: kong-test-container
 	docker exec kong /kong/.ci/run_tests.sh && make update-cache-images
 
 release-kong: test
-	ARCHITECTURE=amd64 \
+#	ARCHITECTURE=amd64
+	ARCHITECTURE=s390x \
 	RESTY_IMAGE_BASE=$(RESTY_IMAGE_BASE) \
 	RESTY_IMAGE_TAG=$(RESTY_IMAGE_TAG) \
 	KONG_PACKAGE_NAME=$(KONG_PACKAGE_NAME) \
@@ -278,15 +288,9 @@ release-kong: test
 	PRIVATE_REPOSITORY=$(PRIVATE_REPOSITORY) \
 	RELEASE_DOCKER_ONLY=$(RELEASE_DOCKER_ONLY) \
 	OFFICIAL_RELEASE=$(OFFICIAL_RELEASE) \
-	DOCKER_LABEL_CREATED=`date -u +'%Y-%m-%dT%H:%M:%SZ'` \
-	DOCKER_LABEL_REVISION=$(KONG_SHA) \
 	./release-kong.sh
 ifeq ($(BUILDX),true)
-	@DOCKER_MACHINE_NAME=$(shell docker-machine env $(DOCKER_MACHINE_ARM64_NAME) | grep 'DOCKER_MACHINE_NAME=".*"' | cut -d\" -f2) \
-	DOCKER_TLS_VERIFY=1 \
-	DOCKER_HOST=$(shell docker-machine env $(DOCKER_MACHINE_ARM64_NAME) | grep 'DOCKER_HOST=".*"' | cut -d\" -f2) \
-	DOCKER_CERT_PATH=$(shell docker-machine env $(DOCKER_MACHINE_ARM64_NAME) | grep 'DOCKER_CERT_PATH=".*"' | cut -d\" -f2) \
-	ARCHITECTURE=arm64 \
+	@ARCHITECTURE=arm64 \
 	RESTY_IMAGE_BASE=$(RESTY_IMAGE_BASE) \
 	RESTY_IMAGE_TAG=$(RESTY_IMAGE_TAG) \
 	KONG_PACKAGE_NAME=$(KONG_PACKAGE_NAME) \
@@ -296,8 +300,6 @@ ifeq ($(BUILDX),true)
 	PRIVATE_REPOSITORY=$(PRIVATE_REPOSITORY) \
 	RELEASE_DOCKER_ONLY=$(RELEASE_DOCKER_ONLY) \
 	OFFICIAL_RELEASE=$(OFFICIAL_RELEASE) \
-	DOCKER_LABEL_CREATED=`date -u +'%Y-%m-%dT%H:%M:%SZ'` \
-	DOCKER_LABEL_REVISION=$(KONG_SHA) \
 	./release-kong.sh
 endif
 
@@ -308,7 +310,6 @@ ifneq ($(RESTY_IMAGE_BASE),src)
 	KONG_VERSION=$(KONG_VERSION) \
 	RESTY_IMAGE_BASE=$(RESTY_IMAGE_BASE) \
 	RESTY_IMAGE_TAG=$(RESTY_IMAGE_TAG) \
-	PACKAGE_TYPE=$(PACKAGE_TYPE) \
 	EDITION=$(EDITION) \
 	KONG_TEST_CONTAINER_TAG=$(KONG_TEST_CONTAINER_TAG) \
 	KONG_TEST_IMAGE_NAME=$(KONG_TEST_IMAGE_NAME) \
@@ -341,21 +342,8 @@ ifneq ($(RESTY_IMAGE_BASE),src)
 endif
 
 build-test-container:
+ifneq ($(RESTY_IMAGE_BASE),src)
 	touch test/kong_license.private
-	ARCHITECTURE=amd64 \
-	RESTY_IMAGE_BASE=$(RESTY_IMAGE_BASE) \
-	RESTY_IMAGE_TAG=$(RESTY_IMAGE_TAG) \
-	KONG_VERSION=$(KONG_VERSION) \
-	KONG_PACKAGE_NAME=$(KONG_PACKAGE_NAME) \
-	KONG_TEST_IMAGE_NAME=$(KONG_TEST_IMAGE_NAME) \
-	DOCKER_KONG_VERSION=$(DOCKER_KONG_VERSION) \
-	test/build_container.sh
-ifeq ($(BUILDX),true)
-	DOCKER_MACHINE_NAME=$(shell docker-machine env $(DOCKER_MACHINE_ARM64_NAME) | grep 'DOCKER_MACHINE_NAME=".*"' | cut -d\" -f2) \
-	DOCKER_TLS_VERIFY=1 \
-	DOCKER_HOST=$(shell docker-machine env $(DOCKER_MACHINE_ARM64_NAME) | grep 'DOCKER_HOST=".*"' | cut -d\" -f2) \
-	DOCKER_CERT_PATH=$(shell docker-machine env $(DOCKER_MACHINE_ARM64_NAME) | grep 'DOCKER_CERT_PATH=".*"' | cut -d\" -f2) \
-	ARCHITECTURE=arm64 \
 	RESTY_IMAGE_BASE=$(RESTY_IMAGE_BASE) \
 	RESTY_IMAGE_TAG=$(RESTY_IMAGE_TAG) \
 	KONG_VERSION=$(KONG_VERSION) \
@@ -380,7 +368,6 @@ cleanup-tests:
 ifneq ($(RESTY_IMAGE_BASE),src)
 	docker-compose -f test/kong-tests-compose.yaml down
 	docker-compose -f test/kong-tests-compose.yaml rm -f
-	docker volume prune -f
 endif
 
 cleanup: cleanup-tests cleanup-build

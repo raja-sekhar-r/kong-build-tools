@@ -1,10 +1,15 @@
-# Dockerfile - Centos
-# Centos base image with all prerequisites to compile / install openresty and Kong
+# Dockerfile - UBI8 
+# UBI8 base image with all prerequisites to compile / install openresty and Kong
 
-ARG RESTY_IMAGE_BASE="centos"
-ARG RESTY_IMAGE_TAG="7"
+ARG RESTY_IMAGE_BASE="registry.access.redhat.com/ubi8/ubi"
+ARG RESTY_IMAGE_TAG="latest"
 
 FROM ${RESTY_IMAGE_BASE}:${RESTY_IMAGE_TAG}
 
-RUN yum -y install wget tar readline-devel pcre-devel openssl-devel gcc curl unzip \
-  zlib-devel make gcc gcc-c++ bzip2 patch perl m4 git
+
+RUN dnf update -y && dnf install sudo wget yum ncurses-devel -y && \
+    yum install -y http://img.cs.montana.edu/linux/fedora/releases/30/Modular/x86_64/os/Packages/p/perl-Math-BigInt-1.9998.06-415.module_2561+625a90a5.noarch.rpm && \
+    yum install -y https://downloads.redhat.com/redhat/rhel/rhel-8-beta/baseos/s390x/Packages/dos2unix-7.4.0-3.el8.s390x.rpm && \
+    yum install -y https://downloads.redhat.com/redhat/rhel/rhel-8-beta/baseos/s390x/Packages/readline-devel-7.0-10.el8.s390x.rpm && \
+    yum -y install diffutils.s390x tar pcre-devel openssl-devel gcc curl unzip \
+           zlib-devel make gcc gcc-c++ bzip2 patch perl m4 git

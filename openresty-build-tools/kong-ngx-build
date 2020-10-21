@@ -421,13 +421,26 @@ main() {
   if [ ! -f $OPENRESTY_INSTALL/nginx/sbin/nginx ]; then
     notice "Building OpenResty..."
 
+    if [[ $(uname -m) -eq "s390x" ]]; then
+      echo "WoW, Its a Mainframe.. Lets Tune accordingly"
+      sed -i '730,773s/.*/#&/' /work/openresty-1.15.8.3/configure
+      sed -i '723s/.*/#&/' /work/openresty-1.15.8.3/configure
+      sed -i '704,713s/.*/#&/' /work/openresty-1.15.8.3/configure
+      rm -rf /work/openresty-1.15.8.3/bundle/LuaJIT-2.1-20190507/*
+      wget https://github.com/openresty/luajit2/archive/v2.1-20190912.tar.gz
+      tar -zxf v2.1-20190912.tar.gz
+      patch -b $PWD/luajit2-2.1-20190912/src/vm_s390x.dasc /tmp/vm_s390x.dasc.patch 
+      cp -r $PWD/luajit2-2.1-20190912/* /work/openresty-1.15.8.3/bundle/LuaJIT-2.1-20190507/
+#      sed -i 'g/--enable-jit/ ' /work/openresty-1.15.8.3/build/nginx-1.15.8/objs/Makefile
+    fi
+
     pushd $OPENRESTY_DOWNLOAD
       if [ ! -f Makefile ]; then
         OPENRESTY_RPATH=${OPENRESTY_RPATH:-$OPENSSL_INSTALL/lib}
         OPENRESTY_OPTS=(
           "--prefix=$OPENRESTY_PREFIX"
           "--with-cc-opt='-I$OPENSSL_INSTALL/include'"
-          "--with-pcre-jit"
+#          "--with-pcre-jit"
           "--with-http_ssl_module"
           "--with-http_realip_module"
           "--with-http_stub_status_module"

@@ -1,4 +1,4 @@
-ARG RESTY_IMAGE_BASE="ubuntu"
+ARG RESTY_IMAGE_BASE="ubuntu"#
 ARG RESTY_IMAGE_TAG="bionic"
 ARG DOCKER_BASE_SUFFIX
 ARG DOCKER_REPOSITORY
@@ -30,7 +30,8 @@ RUN if [ "$EDITION" = "enterprise" ] ; then curl -fsSLo /tmp/gmp-${KONG_GMP_VERS
     && tar xjf gmp-${KONG_GMP_VERSION}.tar.bz2 \
     && ln -s /tmp/gmp-${KONG_GMP_VERSION} /tmp/gmp \
     && cd /tmp/gmp \
-    && ./configure --build=x86_64-linux-gnu --enable-static=no --libdir=/tmp/build/usr/local/kong/lib \
+#    && ./configure --build=x86_64-linux-gnu --enable-static=no --libdir=/tmp/build/usr/local/kong/lib \
+    && ./configure --build=s390x-linux-gnu --enable-static=no --libdir=/tmp/build/usr/local/kong/lib \
     && make -j${RESTY_J}; fi
 
 ARG KONG_NETTLE_VERSION="3.4.1"
@@ -73,7 +74,7 @@ LABEL resty_version="${RESTY_VERSION}"
 ARG RESTY_OPENSSL_VERSION=1.1.1c
 LABEL resty_openssl_version="${RESTY_OPENSSL_VERSION}"
 
-ARG RESTY_PCRE_VERSION=8.41
+ARG RESTY_PCRE_VERSION=8.44
 LABEL resty_pcre_version="${RESTY_PCRE_VERSION}"
 
 ARG RESTY_LUAROCKS_VERSION=2.4.3
@@ -86,12 +87,14 @@ COPY build-openresty.sh /tmp/build-openresty.sh
 ARG OPENRESTY_PATCHES=1
 ENV OPENRESTY_PATCHES="${OPENRESTY_PATCHES}"
 
+####RAJA ++ 
+COPY vm_s390x.dasc.patch /tmp/vm_s390x.dasc.patch
+
 COPY kong-licensing /enterprise/kong-licensing
 COPY lua-kong-nginx-module /enterprise/lua-kong-nginx-module
 
 ARG DEBUG=1
-RUN DEBUG="${DEBUG}" /tmp/build-openresty.sh \
-    && rm -rf /work
+RUN DEBUG="${DEBUG}" /tmp/build-openresty.sh 
 
 WORKDIR /kong
 COPY kong /kong

@@ -1,0 +1,13 @@
+--- vm_s390x.dasc	2020-09-27 22:26:20.793124136 -0700
++++ vm_s390x_FIXED.dasc	2020-09-27 22:28:17.864464262 -0700
+@@ -2540,8 +2540,8 @@
+     |  lg RB, 0(RD, BASE)
+     |  srag RB, RB, 47
+     |  load_false RC
+-    |  cghi RB, LJ_TTRUE
+-    |  je >1
++    |  clfi RB, LJ_TISTRUECOND
++    |  jl >1
+     |  load_true RC
+     |1:
+     |  stg RC, 0(RA, BASE)
